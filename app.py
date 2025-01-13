@@ -1,14 +1,17 @@
 from flask import Flask, request, render_template, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import os
-from transformers import GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDecoderModel
+from transformers import GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDecoderModel, pipeline
 from PIL import Image
 import torch
 
-# Load the fine-tuned model and tokenizer
-model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-tokenizer = GPT2TokenizerFast.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-image_processor = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+# Load the ViT-GPT2 model and tokenizer
+vit_model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+vit_tokenizer = GPT2TokenizerFast.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+vit_image_processor = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+
+# Load the GIT-large-COCO model
+caption_generator_git = pipeline("image-to-text", model="microsoft/git-large-coco")
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -60,15 +63,17 @@ def generate_captions(data=None):
     try:
         image = Image.open(image_path)
 
-        pixel_values = image_processor(image, return_tensors="pt").pixel_values
+        # Generate caption using ViT-GPT2 model
+        pixel_values = vit_image_processor(image, return_tensors="pt").pixel_values
+        generated_ids = vit_model.generate(pixel_values)
+        vit_caption = vit_tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
-        # Generate caption for ViT-GPT2 model:
-        generated_ids = model.generate(pixel_values)
-        generated_text = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        # Generate caption using GIT-large-COCO model
+        git_caption = caption_generator_git(image)[0]['generated_text']
 
         captions = {
-            "ViT-GPT2": generated_text,
-            "Model_2": "Placeholder caption from Model 2",
+            "ViT-GPT2": vit_caption,
+            "GIT-large-COCO": git_caption,
             "Model_3": "Placeholder caption from Model 3",
             "Model_4": "Placeholder caption from Model 4",
         }
