@@ -1,7 +1,7 @@
 from flask import Flask, request, render_template, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import os
-from transformers import GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDecoderModel, pipeline
+from transformers import GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDecoderModel, BlipProcessor, BlipForConditionalGeneration, pipeline
 from PIL import Image
 import torch
 
@@ -12,6 +12,10 @@ vit_image_processor = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-ima
 
 # Load the GIT-large-COCO model
 caption_generator_git = pipeline("image-to-text", model="microsoft/git-large-coco")
+
+# Load the BLIP processor and model
+blip_processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-large")
+blip_model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-large")
 
 # Initialize Flask application
 app = Flask(__name__)
@@ -32,6 +36,12 @@ def allowed_file(filename):
 def load_dataset():
     images = [f for f in os.listdir(DATASET_FOLDER) if allowed_file(f)]
     return images
+
+def generate_captions_blip(image):
+    image = image.convert('RGB')
+    inputs = blip_processor(image, return_tensors="pt")
+    out = blip_model.generate(**inputs, max_new_tokens=50)
+    return blip_processor.decode(out[0], skip_special_tokens=True)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -71,10 +81,13 @@ def generate_captions(data=None):
         # Generate caption using GIT-large-COCO model
         git_caption = caption_generator_git(image)[0]['generated_text']
 
+        # Generate caption using BLIP model
+        blip_caption = generate_captions_blip(image)
+
         captions = {
             "ViT-GPT2": vit_caption,
             "GIT-large-COCO": git_caption,
-            "Model_3": "Placeholder caption from Model 3",
+            "BLIP": blip_caption,
             "Model_4": "Placeholder caption from Model 4",
         }
 
