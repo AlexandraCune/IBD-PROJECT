@@ -1,9 +1,11 @@
+import subprocess
 from flask import Flask, request, render_template, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
 import os
 from transformers import GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDecoderModel, BlipProcessor, BlipForConditionalGeneration, pipeline
 from PIL import Image
 import torch
+import requests
 
 # Load the ViT-GPT2 model and tokenizer
 vit_model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
@@ -84,11 +86,14 @@ def generate_captions(data=None):
         # Generate caption using BLIP model
         blip_caption = generate_captions_blip(image)
 
+        # Generate caption using ofa-large-caption model
+        ofa_caption = generate_ofa_caption(image_path)
+
         captions = {
             "ViT-GPT2": vit_caption,
             "GIT-large-COCO": git_caption,
             "BLIP": blip_caption,
-            "Model_4": "Placeholder caption from Model 4",
+            "OFA-large-caption": ofa_caption,
         }
 
         return render_template("result.html", image_path=image_path, captions=captions)
@@ -107,6 +112,14 @@ def dataset_images_popup():
 def dataset_file(filename):
     return send_from_directory(DATASET_FOLDER, filename)
 
+def generate_ofa_caption(image_path):
+    url = "http://localhost:5001/generate_caption"
+    response = requests.post(url, json={"image_path": image_path})
+
+    if response.status_code == 200:
+        return response.json().get("caption")
+    else:
+        return f"Error: {response.json().get('error', 'Unknown error')}"
 
 if __name__ == "__main__":
     app.run(debug=True)
