@@ -1,3 +1,4 @@
+import json
 import subprocess
 from flask import Flask, request, render_template, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
@@ -6,6 +7,13 @@ from transformers import GPT2TokenizerFast, ViTImageProcessor, VisionEncoderDeco
 from PIL import Image
 import torch
 import requests
+from transformers import BertTokenizer, BertModel
+import torch
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+model = BertModel.from_pretrained('bert-base-uncased')
 
 # Load the ViT-GPT2 model and tokenizer
 vit_model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
@@ -45,6 +53,23 @@ def generate_captions_blip(image):
     out = blip_model.generate(**inputs, max_new_tokens=50)
     return blip_processor.decode(out[0], skip_special_tokens=True)
 
+def get_sentence_embedding(sentence):
+    inputs = tokenizer(sentence, return_tensors='pt', padding=True, truncation=True, max_length=512)
+    with torch.no_grad():
+        outputs = model(**inputs)
+    last_hidden_states = outputs.last_hidden_state
+    sentence_embedding = torch.mean(last_hidden_states, dim=1).squeeze()
+    return sentence_embedding
+
+def are_sentences_equivalent(sentence1, sentence2, threshold=0.85):
+    embedding1 = get_sentence_embedding(sentence1)
+    embedding2 = get_sentence_embedding(sentence2)
+    similarity = cosine_similarity(embedding1.reshape(1, -1), embedding2.reshape(1, -1))[0][0]
+    print(f"Similaritatea cosinus între propoziții: {similarity}")
+    if similarity > threshold:
+        return True
+    else:
+        return False
 
 @app.route("/", methods=["GET", "POST"])
 def upload_or_choose_image():
@@ -89,14 +114,30 @@ def generate_captions(data=None):
         # Generate caption using ofa-large-caption model
         ofa_caption = generate_ofa_caption(image_path)
 
+        with open('captions_and_images.json', 'r') as f:
+            captions_data = json.load(f)
+        image_name = os.path.basename(image_path)  # Extract image name from the path
+        coco_caption = None
+        for item in captions_data:
+            if item["image_name"] == image_name:
+                coco_caption = item["caption"]
+                break
         captions = {
             "ViT-GPT2": vit_caption,
             "GIT-large-COCO": git_caption,
             "BLIP": blip_caption,
             "OFA-large-caption": ofa_caption,
         }
+        if coco_caption:
+            captions["COCO"] = coco_caption
 
-        return render_template("result.html", image_path=image_path, captions=captions)
+        caption_colors = {}
+        for model, caption in captions.items():
+            if model != "COCO":
+                is_equivalent = are_sentences_equivalent(caption, coco_caption if coco_caption else "")
+                caption_colors[model] = "green" if is_equivalent else "red"
+
+        return render_template("result.html", image_path=image_path, captions=captions, caption_colors=caption_colors)
 
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)})
